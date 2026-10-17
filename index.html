@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Alchemy Sort — prototype by Aleksandra Vukkert</title>
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700&family=Cormorant+Garamond:ital,wght@0,500;1,500&display=swap" rel="stylesheet">
+<style>
+  :root{--bg:#0b0712;--ink:#efe6ff;--muted:#a99cc4;--gold:#e9c46a;--card:#150e22}
+  *{box-sizing:border-box}
+  body{margin:0;background:radial-gradient(circle at 50% 0%,#2a1840,var(--bg) 60%);color:var(--ink);font-family:"Cormorant Garamond",Georgia,serif;line-height:1.5;min-height:100vh}
+  main{max-width:720px;margin:0 auto;padding:40px 20px 60px}
+  .kicker{font-family:Cinzel,serif;letter-spacing:4px;font-size:12px;color:var(--muted)}
+  h1{font-family:Cinzel,serif;font-size:38px;letter-spacing:6px;margin:6px 0 4px;color:var(--gold);text-shadow:0 0 30px #e9c46a55}
+  .lead{font-size:21px;font-style:italic;color:var(--muted);margin:0 0 22px}
+  .play{display:inline-block;font-family:Cinzel,serif;letter-spacing:3px;font-size:15px;color:#140d1f;background:linear-gradient(#f3d98c,#d9a94a);text-decoration:none;padding:14px 30px;border-radius:999px;box-shadow:0 0 30px #e9c46a55}
+  .card{background:var(--card);border:1px solid #e9c46a22;border-radius:18px;padding:22px;margin-top:28px}
+  h2{font-family:Cinzel,serif;font-size:16px;letter-spacing:3px;color:var(--gold);margin:0 0 10px}
+  dl{margin:0;display:grid;grid-template-columns:150px 1fr;gap:10px 16px;font-size:18px}
+  dt{color:var(--muted);font-style:italic}
+  dd{margin:0}
+  footer{color:var(--muted);font-size:17px;margin-top:28px}
+  @media(max-width:560px){dl{grid-template-columns:1fr}dt{margin-top:8px}h1{font-size:30px}}
+</style>
+</head>
+<body>
+<main>
+  <div class="kicker">PLAYABLE PROTOTYPE · PUZZLE / SORT</div>
+  <h1>ALCHEMY SORT</h1>
+  <p class="lead">A dark-fantasy take on the liquid sort genre: pour glowing elixirs between glass flasks until every vessel holds one pure essence. Best played on a phone, with sound on.</p>
+  <a class="play" href="alchemy-sort/">PLAY</a>
+
+  <section class="card">
+    <h2>DESIGN NOTES</h2>
+    <dl>
+      <dt>Why this genre</dt><dd>Sort puzzles are understood in three seconds, scale in difficulty with a single parameter (number of colours) and fit short mobile sessions.</dd>
+      <dt>The twist</dt><dd>Atmosphere instead of flat colour blocks: an alchemist's lab, candlelight, glass, glowing liquids, a sealing cork and a burst of sparks when a flask is pure. The goal is to make every pour feel satisfying.</dd>
+      <dt>Under the hood</dt><dd>Levels are generated procedurally and checked by a solver, so every level is guaranteed solvable. Difficulty grows from 3 to 7 essences. Undo and restart are built in; all visuals and sounds are code, no assets.</dd>
+      <dt>What I'd test next</dt><dd>A meta layer (each solved level brews an ingredient for a rare potion recipe book), “hidden” layers that reveal their colour only when on top, and whether a limited-undo economy with rewarded refills lifts session length and D1 retention.</dd>
+    </dl>
+  </section>
+
+  <footer>Made by Aleksandra Vukkert with Claude Code. Background: 6 years in product management (inDrive, Lamoda) and research (JetBrains) — hypotheses, A/B tests and fast iteration are my daily tools. vukkerts@icloud.com</footer>
+</main>
+</body>
+</html>

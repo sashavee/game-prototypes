@@ -1,0 +1,371 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#0b0712">
+<title>Alchemy Sort</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700&family=Cormorant+Garamond:ital,wght@0,500;1,500&display=swap" rel="stylesheet">
+<style>
+  :root{--gold:#e9c46a;--ink:#efe6ff;--muted:#a99cc4}
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;height:100%;background:#0b0712;overflow:hidden;color:var(--ink);font-family:"Cormorant Garamond",Georgia,serif;user-select:none;-webkit-user-select:none}
+  canvas{position:fixed;inset:0;width:100%;height:100%;touch-action:none;display:block}
+  #top{position:fixed;top:max(14px,env(safe-area-inset-top));left:0;right:0;text-align:center;pointer-events:none}
+  #title{font-family:Cinzel,serif;font-weight:700;letter-spacing:6px;font-size:15px;color:var(--gold);text-shadow:0 0 18px #e9c46a66}
+  #level{font-style:italic;font-size:17px;color:var(--muted);margin-top:2px}
+  #bar{position:fixed;bottom:max(18px,env(safe-area-inset-bottom));left:0;right:0;display:flex;justify-content:center;gap:16px}
+  .btn{width:52px;height:52px;border-radius:50%;border:1px solid #e9c46a55;background:radial-gradient(circle at 35% 30%,#2b2140,#120c1d);color:var(--gold);font-size:22px;display:flex;align-items:center;justify-content:center;box-shadow:0 0 18px #0008,inset 0 1px 0 #ffffff14;cursor:pointer}
+  .btn:active{transform:scale(.94)}
+  .btn.off{opacity:.4}
+  #overlay{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:radial-gradient(circle at 50% 45%,#1a1129cc,#06040bf2);z-index:5;transition:opacity .5s}
+  #overlay.hide{opacity:0;pointer-events:none}
+  .card{text-align:center;padding:24px;max-width:340px}
+  .card h1{font-family:Cinzel,serif;font-weight:700;letter-spacing:8px;font-size:30px;margin:0;color:var(--gold);text-shadow:0 0 30px #e9c46a77}
+  .card .sub{font-style:italic;font-size:20px;color:var(--muted);line-height:1.35;margin:14px 0 26px}
+  .card .go{font-family:Cinzel,serif;letter-spacing:3px;font-size:15px;color:#140d1f;background:linear-gradient(#f3d98c,#d9a94a);border:0;border-radius:999px;padding:14px 34px;box-shadow:0 0 30px #e9c46a55;cursor:pointer}
+  .rune{font-size:42px;color:var(--gold);opacity:.85;margin-bottom:10px;text-shadow:0 0 24px #e9c46a}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="top"><div id="title">ALCHEMY SORT</div><div id="level">Level 1</div></div>
+<div id="bar">
+  <div class="btn" id="undo" title="Undo">↶</div>
+  <div class="btn" id="restart" title="Restart">⟲</div>
+  <div class="btn" id="mute" title="Sound">♪</div>
+</div>
+<div id="overlay"><div class="card" id="card">
+  <div class="rune">⚗</div>
+  <h1>ALCHEMY<br>SORT</h1>
+  <div class="sub">Pour the elixirs from flask to flask until every vessel holds a single, pure essence.</div>
+  <button class="go" id="go">BEGIN</button>
+</div></div>
+<script>
+"use strict";
+// ---------- setup ----------
+const cvs=document.getElementById("c"),ctx=cvs.getContext("2d");
+let W=0,H=0,DPR=1;
+const CAP=4;
+const PALETTE=[
+  {c:"#ff2e63",l:"#ff9bb5"},{c:"#1fe0a0",l:"#a6ffe0"},{c:"#9a5cff",l:"#d3b8ff"},{c:"#ffae2b",l:"#ffe2a3"},
+  {c:"#2ab7ff",l:"#b3e8ff"},{c:"#ff5fd0",l:"#ffc4ef"},{c:"#d7f04a",l:"#f3ffb8"}];
+let flasks=[],level=0,selected=-1,busy=false,history=[],particles=[],embers=[],won=false,muted=false,t0=performance.now();
+try{level=+localStorage.getItem("alchemy-level")||0}catch(e){}
+try{muted=localStorage.getItem("alchemy-muted")==="1"}catch(e){}
+
+function resize(){
+  DPR=Math.min(window.devicePixelRatio||1,2);W=innerWidth;H=innerHeight;
+  cvs.width=W*DPR;cvs.height=H*DPR;ctx.setTransform(DPR,0,0,DPR,0,0);
+  layout();
+}
+addEventListener("resize",resize);
+
+// ---------- helpers ----------
+const lerp=(a,b,t)=>a+(b-a)*t;
+const ease=t=>t<.5?2*t*t:1-Math.pow(-2*t+2,2)/2;
+const easeOut=t=>1-Math.pow(1-t,3);
+function shade(hex,amt){let n=parseInt(hex.slice(1),16),r=n>>16,g=n>>8&255,b=n&255;
+  const f=amt<0?0:255,p=Math.abs(amt);r=Math.round((f-r)*p+r);g=Math.round((f-g)*p+g);b=Math.round((f-b)*p+b);return`rgb(${r},${g},${b})`}
+function rgba(hex,a){const n=parseInt(hex.slice(1),16);return`rgba(${n>>16},${n>>8&255},${n&255},${a})`}
+const tweens=[];
+function tween(dur,fn,ez=ease){return new Promise(res=>tweens.push({t:0,dur,fn,ez,res,start:performance.now()}))}
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+
+// ---------- audio ----------
+let AC=null;
+function audio(){if(!AC){try{AC=new (window.AudioContext||window.webkitAudioContext)()}catch(e){}}if(AC&&AC.state==="suspended")AC.resume();return AC}
+function tone(freq,dur,vol=.15,type="sine",when=0){
+  const a=audio();if(!a||muted)return;const t=a.currentTime+when;
+  const o=a.createOscillator(),g=a.createGain();o.type=type;o.frequency.value=freq;
+  g.gain.setValueAtTime(0,t);g.gain.linearRampToValueAtTime(vol,t+.01);g.gain.exponentialRampToValueAtTime(.0001,t+dur);
+  o.connect(g).connect(a.destination);o.start(t);o.stop(t+dur+.05);
+}
+const sfx={
+  clink(){tone(2100,.25,.08);tone(3150,.18,.04)},
+  bad(){tone(180,.18,.08,"triangle");tone(140,.22,.06,"triangle",.05)},
+  pour(n){for(let i=0;i<5*n;i++)tone(300+Math.random()*500,.08,.035,"sine",i*.06)},
+  seal(){[784,988,1319].forEach((f,i)=>tone(f,.9,.07,"sine",i*.07))},
+  win(){[523,659,784,1047,1319].forEach((f,i)=>tone(f,1.4,.07,"sine",i*.11));tone(262,1.8,.05,"triangle",.1)}
+};
+
+// ---------- level generation ----------
+function solvable(start){
+  const seen=new Set();let nodes=0;
+  const key=s=>s.map(f=>f.join("")).sort().join("|");
+  const done=s=>s.every(f=>!f.length||(f.length===CAP&&f.every(x=>x===f[0])));
+  function dfs(s){
+    if(done(s))return true;if(++nodes>120000)return false;
+    const k=key(s);if(seen.has(k))return false;seen.add(k);
+    for(let i=0;i<s.length;i++)for(let j=0;j<s.length;j++){
+      if(i===j)continue;const a=s[i],b=s[j];if(!a.length||b.length>=CAP)continue;
+      const top=a[a.length-1];if(b.length&&b[b.length-1]!==top)continue;
+      if(!b.length&&a.every(x=>x===top))continue;
+      let cnt=0;for(let q=a.length-1;q>=0&&a[q]===top;q--)cnt++;
+      const m=Math.min(cnt,CAP-b.length),ns=s.map(f=>f.slice());
+      for(let r=0;r<m;r++)ns[j].push(ns[i].pop());
+      if(dfs(ns))return true;
+    }
+    return false;
+  }
+  return dfs(start.map(f=>f.slice()));
+}
+function generate(lv){
+  const colors=Math.min(7,3+Math.floor((lv+1)/2)),empty=colors>=6?2:2;
+  for(let attempt=0;attempt<200;attempt++){
+    const units=[];for(let c=0;c<colors;c++)for(let k=0;k<CAP;k++)units.push(c);
+    for(let i=units.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[units[i],units[j]]=[units[j],units[i]]}
+    const fl=[];for(let c=0;c<colors;c++)fl.push(units.slice(c*CAP,c*CAP+CAP));
+    if(fl.some(f=>f.every(x=>x===f[0])))continue;
+    for(let e=0;e<empty;e++)fl.push([]);
+    if(solvable(fl))return fl;
+  }
+  return null;
+}
+
+// ---------- flasks ----------
+function makeFlask(units){return{units,show:units.slice(),level:units.length,x:0,y:0,bx:0,by:0,lift:0,ang:0,shake:0,seal:0,glow:0,bubbles:[],z:0}}
+let fw=50,fh=160;
+function layout(){
+  const n=flasks.length;if(!n)return;
+  const perRow=n<=5?n:Math.ceil(n/2),rows=n<=5?1:2;
+  fw=Math.min(62,(W-36)/(perRow*1.45));fh=fw*3.1;
+  const gapX=Math.min(fw*1.6,(W-36)/perRow),gapY=fh*1.45;
+  const totalH=rows*fh+(rows-1)*(gapY-fh);
+  const top=H*0.5-totalH/2+fh*0.45+10;
+  flasks.forEach((f,i)=>{
+    const r=rows===1?0:(i<perRow?0:1),idx=r===0?i:i-perRow,cnt=r===0?Math.min(perRow,n):n-perRow;
+    f.bx=W/2+(idx-(cnt-1)/2)*gapX;f.by=top+r*gapY;
+    if(!busy||!f.moving){f.x=f.bx;f.y=f.by}
+  });
+}
+function topColor(f){return f.units[f.units.length-1]}
+function topRun(f){const c=topColor(f);let k=0;for(let i=f.units.length-1;i>=0&&f.units[i]===c;i--)k++;return k}
+function complete(f){return f.units.length===CAP&&f.units.every(x=>x===f.units[0])}
+function canPour(a,b){if(a===b||!a.units.length||b.units.length>=CAP||complete(a))return false;return!b.units.length||topColor(b)===topColor(a)}
+
+function startLevel(){
+  const g=generate(level);flasks=g.map(makeFlask);selected=-1;history=[];won=false;busy=false;
+  document.getElementById("level").textContent="Level "+(level+1);
+  try{localStorage.setItem("alchemy-level",level)}catch(e){}
+  layout();
+}
+
+// ---------- interaction ----------
+function hitFlask(x,y){
+  for(let i=0;i<flasks.length;i++){const f=flasks[i];if(Math.abs(x-f.x)<fw*0.85&&y>f.y-f.lift-fh*0.62&&y<f.y-f.lift+fh*0.6)return i}
+  return -1;
+}
+cvs.addEventListener("pointerdown",e=>{
+  audio();if(busy||won)return;
+  const i=hitFlask(e.clientX,e.clientY);
+  if(i<0){if(selected>=0){lower(selected);selected=-1}return}
+  if(selected<0){
+    if(!flasks[i].units.length||complete(flasks[i])){nudge(i);return}
+    selected=i;raise(i);sfx.clink();return;
+  }
+  if(i===selected){lower(i);selected=-1;return}
+  const a=flasks[selected],b=flasks[i];
+  if(canPour(a,b)){const s=selected;selected=-1;pour(s,i)}
+  else{nudge(i);sfx.bad();lower(selected);selected=-1}
+});
+function raise(i){const f=flasks[i],s=f.lift;tween(180,t=>f.lift=lerp(s,fh*0.16,t),easeOut)}
+function lower(i){const f=flasks[i],s=f.lift;tween(180,t=>f.lift=lerp(s,0,t),easeOut)}
+function nudge(i){const f=flasks[i];tween(320,t=>f.shake=Math.sin(t*Math.PI*5)*(1-t)*6,x=>x)}
+
+async function pour(si,ti){
+  busy=true;
+  const a=flasks[si],b=flasks[ti];
+  history.push(flasks.map(f=>f.units.slice()));
+  const color=topColor(a),k=Math.min(topRun(a),CAP-b.units.length);
+  const dir=a.bx<b.bx?-1:1;
+  const ang=-dir*1.12;
+  const mouthX=b.bx+dir*fw*0.18,mouthY=b.by-fh/2-fh*0.12;
+  const tx=mouthX-Math.sin(ang)*fh/2,ty=mouthY+Math.cos(ang)*fh/2;
+  const sx=a.x,sy=a.y,sl=a.lift;a.moving=true;a.z=1;
+  await tween(300,t=>{a.x=lerp(sx,tx,t);a.y=lerp(sy,ty,t);a.lift=lerp(sl,0,t);a.ang=lerp(0,ang*0.55,t)});
+  await tween(160,t=>a.ang=lerp(ang*0.55,ang,t));
+  // transfer
+  const aShow=a.units.slice(),aLen=a.units.length;
+  for(let r=0;r<k;r++)b.units.push(a.units.pop());
+  a.show=aShow;b.show=b.units.slice();const bLen=b.units.length-k;
+  a.pouring={color,ti};sfx.pour(k);
+  await tween(240+170*k,t=>{a.level=aLen-k*t;b.level=bLen+k*t;b.glow=Math.sin(t*Math.PI)},x=>x);
+  a.pouring=null;a.show=a.units.slice();a.level=a.units.length;b.level=b.units.length;b.glow=0;
+  await tween(150,t=>a.ang=lerp(ang,0,t));
+  await tween(300,t=>{a.x=lerp(tx,a.bx,t);a.y=lerp(ty,a.by,t)});
+  a.moving=false;a.z=0;
+  if(complete(b))sealFlask(b);
+  busy=false;
+  if(flasks.every(f=>!f.units.length||complete(f))){won=true;await sleep(900);winLevel()}
+}
+function sealFlask(f){
+  sfx.seal();
+  tween(700,t=>f.seal=easeOut(t));
+  const col=PALETTE[f.units[0]];
+  for(let i=0;i<46;i++){const a=Math.random()*Math.PI*2,s=1+Math.random()*4.5;
+    particles.push({x:f.bx,y:f.by-fh*0.5,vx:Math.cos(a)*s,vy:Math.sin(a)*s-2.5,life:1,decay:.012+Math.random()*.02,size:1+Math.random()*2.6,color:Math.random()<.35?"#fff2c4":col.l})}
+}
+function winLevel(){
+  sfx.win();
+  for(let i=0;i<140;i++){const a=Math.random()*Math.PI*2,s=2+Math.random()*7;
+    particles.push({x:W/2,y:H*0.45,vx:Math.cos(a)*s,vy:Math.sin(a)*s-2,life:1,decay:.008+Math.random()*.012,size:1+Math.random()*3,color:PALETTE[i%PALETTE.length].l})}
+  const lines=["The elixir is pure.","The essences obey you.","Even the old masters would nod.","The furnace hums with approval.","Your mixture glows true."];
+  document.getElementById("card").innerHTML=`<div class="rune">✦</div><h1>LEVEL ${level+1}</h1><div class="sub">${lines[level%lines.length]}</div><button class="go" id="next">NEXT LEVEL</button>`;
+  document.getElementById("overlay").classList.remove("hide");
+  document.getElementById("next").onclick=()=>{level++;document.getElementById("overlay").classList.add("hide");startLevel()};
+}
+document.getElementById("undo").onclick=()=>{
+  if(busy||!history.length||won)return;const s=history.pop();
+  flasks.forEach((f,i)=>{f.units=s[i];f.show=f.units.slice();f.level=f.units.length;f.seal=complete(f)?1:0});
+  if(selected>=0){lower(selected);selected=-1}sfx.clink();
+};
+document.getElementById("restart").onclick=()=>{
+  if(busy||won)return;if(!history.length)return;const s=history[0];history=[];
+  flasks.forEach((f,i)=>{f.units=s[i];f.show=f.units.slice();f.level=f.units.length;f.seal=0;f.lift=0});selected=-1;sfx.clink();
+};
+const muteBtn=document.getElementById("mute");
+function syncMute(){muteBtn.classList.toggle("off",muted)}
+muteBtn.onclick=()=>{muted=!muted;try{localStorage.setItem("alchemy-muted",muted?"1":"0")}catch(e){}syncMute()};syncMute();
+document.getElementById("go").onclick=()=>{audio();sfx.clink();document.getElementById("overlay").classList.add("hide")};
+
+// ---------- drawing ----------
+function tubePath(w,h,inset=0){
+  const r=w/2-inset,top=-h/2+inset+6,bot=h/2-w/2;
+  ctx.beginPath();ctx.moveTo(-r,top);ctx.lineTo(-r,bot);ctx.arc(0,bot,r,Math.PI,0,true);ctx.lineTo(r,top);
+}
+function drawBackground(time){
+  const g=ctx.createRadialGradient(W/2,H*0.42,10,W/2,H*0.5,Math.max(W,H)*0.8);
+  g.addColorStop(0,"#2a1840");g.addColorStop(.45,"#140b22");g.addColorStop(1,"#05030a");
+  ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+  // arched window light
+  ctx.save();ctx.globalAlpha=.07;ctx.fillStyle="#9fb6ff";
+  const ww=Math.min(W*0.5,220),wx=W/2-ww/2,wy=H*0.08,wh=ww*1.25;
+  ctx.beginPath();ctx.moveTo(wx,wy+wh);ctx.lineTo(wx,wy+ww/2);ctx.arc(W/2,wy+ww/2,ww/2,Math.PI,0);ctx.lineTo(wx+ww,wy+wh);ctx.closePath();ctx.fill();
+  ctx.globalAlpha=.05;ctx.fillRect(W/2-1,wy,2,wh);ctx.fillRect(wx,wy+wh*0.55,ww,2);ctx.restore();
+  // candles flicker
+  ctx.save();ctx.globalCompositeOperation="lighter";
+  [[W*0.08,H*0.86,0],[W*0.92,H*0.84,1.7]].forEach(([x,y,ph])=>{
+    const fl=.85+Math.sin(time*7+ph)*.06+Math.sin(time*13.3+ph)*.05;
+    const cg=ctx.createRadialGradient(x,y,0,x,y,Math.min(W,H)*0.55*fl);
+    cg.addColorStop(0,"rgba(255,170,80,.30)");cg.addColorStop(.3,"rgba(255,120,40,.08)");cg.addColorStop(1,"rgba(0,0,0,0)");
+    ctx.fillStyle=cg;ctx.fillRect(0,0,W,H);
+    ctx.fillStyle=`rgba(255,220,150,${.8*fl})`;ctx.beginPath();ctx.ellipse(x,y-6,3.2*fl,8*fl,0,0,Math.PI*2);ctx.fill();
+  });
+  ctx.restore();
+  // shelves
+  const rowsY=[...new Set(flasks.map(f=>Math.round(f.by)))];
+  rowsY.forEach(y=>{
+    const sy=y+fh*0.5+6;ctx.fillStyle="#1d1226";ctx.fillRect(14,sy,W-28,10);
+    ctx.fillStyle="#3a2547";ctx.fillRect(14,sy,W-28,2);
+    const sg=ctx.createLinearGradient(0,sy+10,0,sy+40);sg.addColorStop(0,"rgba(0,0,0,.45)");sg.addColorStop(1,"rgba(0,0,0,0)");ctx.fillStyle=sg;ctx.fillRect(14,sy+10,W-28,30);
+  });
+  // embers
+  if(embers.length<55&&Math.random()<.6)embers.push({x:Math.random()*W,y:H+10,vy:-(.25+Math.random()*.7),vx:(Math.random()-.5)*.25,s:.6+Math.random()*1.6,ph:Math.random()*6,a:.3+Math.random()*.6});
+  ctx.save();ctx.globalCompositeOperation="lighter";
+  embers=embers.filter(p=>{p.y+=p.vy;p.x+=p.vx+Math.sin(time*1.3+p.ph)*.2;
+    const a=p.a*Math.min(1,(H-p.y)/120)*(p.y>40?1:p.y/40);
+    ctx.fillStyle=`rgba(255,190,110,${Math.max(0,a)})`;ctx.beginPath();ctx.arc(p.x,p.y,p.s,0,Math.PI*2);ctx.fill();return p.y>-10});
+  ctx.restore();
+}
+function drawFlask(f,time){
+  const w=fw,h=fh;
+  ctx.save();
+  ctx.translate(f.x+f.shake,f.y-f.lift);ctx.rotate(f.ang);
+  // outer glow from contents
+  const tc=f.show.length?PALETTE[f.show[Math.min(f.show.length-1,Math.max(0,Math.ceil(f.level)-1))]]:null;
+  if(tc){ctx.save();ctx.globalCompositeOperation="lighter";
+    const ga=.18+f.glow*.25+f.seal*.22;const gg=ctx.createRadialGradient(0,h*0.18,2,0,h*0.18,w*1.6);
+    gg.addColorStop(0,rgba(tc.c,ga));gg.addColorStop(1,rgba(tc.c,0));ctx.fillStyle=gg;ctx.fillRect(-w*2,-h,w*4,h*2);ctx.restore()}
+  // liquid (kept level in world space)
+  ctx.save();tubePath(w,h,3);ctx.clip();
+  ctx.rotate(-f.ang);
+  const ca=Math.abs(Math.cos(f.ang)),sa=Math.abs(Math.sin(f.ang));
+  const bottom=(h/2)*ca+(w/2)*sa,extent=h*ca+w*sa,unit=extent/(CAP+0.75);
+  const lv=f.level;
+  for(let i=0;i<f.show.length;i++){
+    const amt=Math.max(0,Math.min(1,lv-i));if(amt<=0)break;
+    const col=PALETTE[f.show[i]];
+    const y1=bottom-i*unit,y0=y1-unit*amt;
+    const lg=ctx.createLinearGradient(-w,0,w,0);
+    lg.addColorStop(0,shade(col.c,-.55));lg.addColorStop(.35,col.c);lg.addColorStop(.55,col.l);lg.addColorStop(.75,col.c);lg.addColorStop(1,shade(col.c,-.6));
+    ctx.fillStyle=lg;
+    const isTop=i===Math.ceil(lv)-1;
+    ctx.beginPath();ctx.moveTo(-w*1.5,y1+1);
+    if(isTop){for(let x=-w*1.5;x<=w*1.5;x+=4)ctx.lineTo(x,y0+Math.sin(x*.18+time*3.2+f.bx)*1.6*(1+f.glow*2))}
+    else{ctx.lineTo(-w*1.5,y0);ctx.lineTo(w*1.5,y0)}
+    ctx.lineTo(w*1.5,y1+1);ctx.closePath();ctx.fill();
+    if(isTop){ctx.fillStyle=rgba(col.l,.55);ctx.fillRect(-w*1.5,y0-1,w*3,2.2)}
+  }
+  // bubbles
+  if(f.show.length&&lv>0.2){
+    if(f.bubbles.length<6&&Math.random()<.05+f.glow*.3)f.bubbles.push({x:(Math.random()-.5)*w*0.6,y:bottom-4,r:.8+Math.random()*2,v:.2+Math.random()*.5});
+    const surf=bottom-unit*lv;
+    f.bubbles=f.bubbles.filter(bb=>{bb.y-=bb.v;bb.x+=Math.sin(time*4+bb.y*.1)*.15;
+      ctx.strokeStyle="rgba(255,255,255,.55)";ctx.lineWidth=.8;ctx.beginPath();ctx.arc(bb.x,bb.y,bb.r,0,Math.PI*2);ctx.stroke();return bb.y>surf+2});
+  }
+  ctx.restore();
+  // glass
+  tubePath(w,h,0);
+  const gl=ctx.createLinearGradient(-w/2,0,w/2,0);
+  gl.addColorStop(0,"rgba(255,255,255,.10)");gl.addColorStop(.25,"rgba(255,255,255,.02)");gl.addColorStop(.8,"rgba(255,255,255,.03)");gl.addColorStop(1,"rgba(255,255,255,.12)");
+  ctx.fillStyle=gl;ctx.fill();
+  ctx.strokeStyle="rgba(225,215,255,.55)";ctx.lineWidth=1.6;ctx.stroke();
+  // highlights
+  ctx.save();ctx.globalCompositeOperation="lighter";
+  ctx.strokeStyle="rgba(255,255,255,.55)";ctx.lineWidth=2.2;ctx.lineCap="round";
+  ctx.beginPath();ctx.moveTo(-w*0.28,-h*0.36);ctx.lineTo(-w*0.28,h*0.18);ctx.stroke();
+  ctx.strokeStyle="rgba(255,255,255,.22)";ctx.lineWidth=1.2;ctx.beginPath();ctx.moveTo(w*0.3,-h*0.3);ctx.lineTo(w*0.3,-h*0.12);ctx.stroke();
+  ctx.restore();
+  // rim
+  ctx.fillStyle="rgba(230,220,255,.35)";ctx.beginPath();ctx.ellipse(0,-h/2+6,w/2+3,3.2,0,0,Math.PI*2);ctx.fill();
+  ctx.strokeStyle="rgba(255,255,255,.6)";ctx.lineWidth=1;ctx.stroke();
+  // cork
+  if(f.seal>0){
+    const s=f.seal,cy=-h/2+6-14*(1-s)-6;
+    ctx.globalAlpha=Math.min(1,s*1.5);
+    const cg=ctx.createLinearGradient(-w/3,0,w/3,0);cg.addColorStop(0,"#5b3a22");cg.addColorStop(.5,"#a77748");cg.addColorStop(1,"#4d301c");
+    ctx.fillStyle=cg;ctx.beginPath();ctx.roundRect(-w*0.3,cy-6,w*0.6,14,4);ctx.fill();
+    ctx.fillStyle="#d8b06a";ctx.beginPath();ctx.arc(0,cy+10,3.5,0,Math.PI*2);ctx.fill();
+    ctx.globalAlpha=1;
+  }
+  ctx.restore();
+}
+function drawStream(f,time){
+  const p=f.pouring;if(!p)return;const b=flasks[p.ti];
+  const mouth={x:f.x+Math.sin(f.ang)*(fh/2-2),y:f.y-Math.cos(f.ang)*(fh/2-2)};
+  const unit=fh/(CAP+0.75),surf=b.y+fh/2-unit*b.level-2;
+  const end={x:mouth.x+(b.x-mouth.x)*0.35,y:surf};
+  const col=PALETTE[p.color];
+  ctx.save();ctx.globalCompositeOperation="lighter";
+  ctx.strokeStyle=col.c;ctx.lineWidth=5+Math.sin(time*30)*.8;ctx.shadowColor=col.c;ctx.shadowBlur=16;ctx.lineCap="round";
+  ctx.beginPath();ctx.moveTo(mouth.x,mouth.y);ctx.quadraticCurveTo(mouth.x+(end.x-mouth.x)*0.2,mouth.y+12,end.x,end.y);ctx.stroke();
+  ctx.shadowBlur=0;ctx.strokeStyle=rgba(col.l,.8);ctx.lineWidth=1.5;ctx.stroke();
+  ctx.restore();
+  if(Math.random()<.6)particles.push({x:end.x+(Math.random()-.5)*8,y:end.y,vx:(Math.random()-.5)*1.5,vy:-Math.random()*2,life:1,decay:.05,size:1+Math.random()*1.5,color:col.l});
+}
+function drawParticles(){
+  ctx.save();ctx.globalCompositeOperation="lighter";
+  particles=particles.filter(p=>{p.x+=p.vx;p.y+=p.vy;p.vy+=.06;p.vx*=.99;p.life-=p.decay;
+    if(p.life<=0)return false;ctx.globalAlpha=p.life;ctx.fillStyle=p.color;ctx.beginPath();ctx.arc(p.x,p.y,p.size,0,Math.PI*2);ctx.fill();return true});
+  ctx.restore();
+}
+function frame(now){
+  const time=(now-t0)/1000;
+  for(let i=tweens.length-1;i>=0;i--){const tw=tweens[i];const t=Math.min(1,(now-tw.start)/tw.dur);tw.fn(tw.ez(t));if(t>=1){tweens.splice(i,1);tw.res()}}
+  ctx.clearRect(0,0,W,H);
+  drawBackground(time);
+  const order=flasks.slice().sort((a,b)=>a.z-b.z);
+  order.forEach(f=>drawFlask(f,time));
+  flasks.forEach(f=>drawStream(f,time));
+  drawParticles();
+  // vignette
+  const v=ctx.createRadialGradient(W/2,H/2,Math.min(W,H)*0.35,W/2,H/2,Math.max(W,H)*0.75);
+  v.addColorStop(0,"rgba(0,0,0,0)");v.addColorStop(1,"rgba(0,0,0,.6)");ctx.fillStyle=v;ctx.fillRect(0,0,W,H);
+  requestAnimationFrame(frame);
+}
+startLevel();resize();requestAnimationFrame(frame);
+</script>
+</body>
+</html>
